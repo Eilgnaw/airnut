@@ -18,10 +18,6 @@ var weatherURL = "https://api.help.bj.cn/apis/weather/?id=101180101"
 var weatherCode = map[string] int {"晴":0,"阴":1,"多云":1,"雨":3,"阵雨":3,"雷阵雨":3,"雷阵雨伴有冰雹":3,"雨夹雪":6,"小雨":3,"中雨":3,"大雨":3,"暴雨":3,"大暴雨":3,"特大暴雨":3,"阵雪":5,"小雪":5,"中雪":5,"大雪":5,"暴雪":5,"雾":2,"冻雨":6,"沙尘暴":2,"小雨转中雨":3,"中雨转大雨":3,"大雨转暴雨":3,"暴雨转大暴雨":3,"大暴雨转特大暴雨":3,"小雪转中雪":5,"中雪转大雪":5,"大雪转暴雪":5,"浮沉":2,"扬沙":2,"强沙尘暴":2,"霾":2}
 
 func main() {
-	// InitDB()
-	// result := getWeather()
-	// wcode := weatherCode[gjson.Parse(result).Get("weather").String()]
-	// fmt.Println(wcode)
 	addr := "0.0.0.0:10512"
 	tcpAddr, err := net.ResolveTCPAddr("tcp",addr)
 	if err != nil {
@@ -51,7 +47,6 @@ func handle_Client(conn net.Conn) {
 	defer conn.Close()
 	var write_buffer1 []byte = []byte("{\"common\": {\"data\": {},\"code\": 0, \"protocol\": \"login\"}}")
 	
-	hbtimes := 0
 	for  {
 		read_buffer := make([]byte, 1024)
 		_, err1 := conn.Read(read_buffer)
@@ -72,7 +67,6 @@ func handle_Client(conn net.Conn) {
 			log.Println("send login msg:", string(write_buffer1)) 
 			
 		case "post":
-			hbtimes = 0  
 			AddData(gjson.Parse(read).Get("param.t").String(), gjson.Parse(read).Get("param.h").String(),gjson.Parse(read).Get("param.pm25").String())
 			log.Println("battery:", gjson.Parse(read).Get("param.battery").String(),"t", gjson.Parse(read).Get("param.t").String(), "h:",gjson.Parse(read).Get("param.h").String()) 
 		
@@ -83,21 +77,18 @@ func handle_Client(conn net.Conn) {
 			var write_buffer []byte = []byte("{\"common\": {\"code\": 0, \"protocol\": \"get_weather\"}, \"param\": {\"weather\":\"" + strconv.Itoa(wcode) + "\", \"time\":"+strconv.FormatInt(ctime,10)+"}}")
 			_, err2 := conn.Write(write_buffer)
 			if err2 != nil {
-				log.Println("ser send error:", err2)
+				log.Println("ser get_weather error:", err2)
+				return
+			}
+			var write_buffer1 []byte = []byte("{\"common\": {\"device\": \"Fun_pm25\", \"protocol\": \"detect\"}, \"param\": {\"fromport\": 8023, \"airid\": 1010695,\"fromhost\": \"one\"}}")
+			_, err2 = conn.Write(write_buffer1)
+			if err2 != nil {
+				log.Println("ser detect error:", err2)
 				return
 			}
 			
 		case "heartbeat":
-			hbtimes += 1
-			if hbtimes % 25 == 0 {
-				var write_buffer []byte = []byte("{\"common\": {\"device\": \"Fun_pm25\", \"protocol\": \"detect\"}, \"param\": {\"fromport\": 8023, \"airid\": 1010695,\"fromhost\": \"one\"}}")
-				_, err2 := conn.Write(write_buffer)
-				if err2 != nil {
-					log.Println("ser send error:", err2)
-					return
-				}
-				log.Println("send detect msg:", string(write_buffer)) 
-			}
+			log.Println("heartbeat") 
 		}
 	}
 }
