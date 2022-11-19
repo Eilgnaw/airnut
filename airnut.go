@@ -1,72 +1,30 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/tidwall/gjson"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// func InitDB(){
-//     dbFileName := "airnut.db"
-// 	db, err := sql.Open("sqlite3", dbFileName)
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		fmt.Scanln()
-// 	}
-// 	defer db.Close()
+//wet_dataA={"晴":0,"阴":1,"多云":1,"雨":3,"阵雨":3,"雷阵雨":3,"雷阵雨伴有冰雹":3,"雨夹雪":6,"小雨":3,"中雨":3,"大雨":3,"暴雨":3,"大暴雨":3,"特大暴雨":3,"阵雪":5,"小雪":5,"中雪":5,"大雪":5,"暴雪":5,"雾":2,"冻雨":6,"沙尘暴":2,"小雨转中雨":3,"中雨转大雨":3,"大雨转暴雨":3,"暴雨转大暴雨":3,"大暴雨转特大暴雨":3,"小雪转中雪":5,"中雪转大雪":5,"大雪转暴雪":5,"浮沉":2,"扬沙":2,"强沙尘暴":2,"霾":2}
 
-// 	sqlStmt := `
-// 	create table airNut (id integer not null primary key, t text, h text, pm25 text, time text);
-// 	`
-// 	_, err = db.Exec(sqlStmt)
-// 	if err != nil {
-// 		log.Printf("%q: %s\n", err, sqlStmt)
-// 		fmt.Scanln()
-// 		return
-// 	}
-// }
-
-func AddData(t string, h string, pm25 string){
-	ctime := time.Now().Add(time.Hour * 8).Unix()
-	dbFileName := "airnut.db"
-	db, err := sql.Open("sqlite3", dbFileName)
-	if err != nil {
-		fmt.Println(err)
-		fmt.Scanln()
-	}
-	defer db.Close()
-	tx, err := db.Begin()
-	if err != nil {
-		fmt.Println(err)
-		fmt.Scanln()
-	}
-	stmt, err := tx.Prepare("insert into airNut(t, h, pm25 , time) values(?, ?, ?, ?)")
-	if err != nil {
-		fmt.Println(err)
-		fmt.Scanln()
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(t, h, pm25, strconv.FormatInt(ctime,10))
-	if err != nil {
-		fmt.Println(err)
-		fmt.Scanln()
-	}
-	err = tx.Commit()
-	if err != nil {
-		fmt.Println(err)
-		fmt.Scanln()
-	}
-}
+var weatherURL = "https://api.help.bj.cn/apis/weather/?id=101180101"
+var weatherCode = map[string] int {"晴":0,"阴":1,"多云":1,"雨":3,"阵雨":3,"雷阵雨":3,"雷阵雨伴有冰雹":3,"雨夹雪":6,"小雨":3,"中雨":3,"大雨":3,"暴雨":3,"大暴雨":3,"特大暴雨":3,"阵雪":5,"小雪":5,"中雪":5,"大雪":5,"暴雪":5,"雾":2,"冻雨":6,"沙尘暴":2,"小雨转中雨":3,"中雨转大雨":3,"大雨转暴雨":3,"暴雨转大暴雨":3,"大暴雨转特大暴雨":3,"小雪转中雪":5,"中雪转大雪":5,"大雪转暴雪":5,"浮沉":2,"扬沙":2,"强沙尘暴":2,"霾":2}
 
 
 func main() {
 	// InitDB()
+	// result := getWeather()
+	// wcode := weatherCode[gjson.Parse(result).Get("weather").String()]
+	// fmt.Println(wcode)
 	addr := "0.0.0.0:10512"
 	tcpAddr, err := net.ResolveTCPAddr("tcp",addr)
 	if err != nil {
@@ -102,7 +60,7 @@ func handle_Client(conn net.Conn) {
 		_, err1 := conn.Read(read_buffer)
 		if err1 != nil {
 			fmt.Println("ser Read failed:", err1)
-			break
+			return
 		}
 		log.Println("read msg:", string(read_buffer))
 		read := string(read_buffer)
@@ -112,39 +70,87 @@ func handle_Client(conn net.Conn) {
 			_, err2 := conn.Write(write_buffer1)
 			if err2 != nil {
 				log.Println("ser send error:", err2)
-				break
+				return
 			}
 			log.Println("send login msg:", string(write_buffer1)) 
 			
 		case "post":
-			// {"common":{"source":"air","protocol":"post","device":"Fun_pm25"},"param":{"pm25":"53","ap_mac":"88C397D13EF5","mac":"C89346AA881F","charge":"1","t":"22.520000","h":"57.990002","battery":"61","manual":1}}
 			hbtimes = 0  
 			AddData(gjson.Parse(read).Get("param.t").String(), gjson.Parse(read).Get("param.h").String(),gjson.Parse(read).Get("param.pm25").String())
 			log.Println("battery:", gjson.Parse(read).Get("param.battery").String(),"t", gjson.Parse(read).Get("param.t").String(), "h:",gjson.Parse(read).Get("param.h").String()) 
+		
+		case "get_weather":
+			result := getWeather()
+			wcode := weatherCode[gjson.Parse(result).Get("weather").String()]
+			ctime := time.Now().Add(time.Hour * 8).Unix()
+			var write_buffer []byte = []byte("{\"common\": {\"code\": 0, \"protocol\": \"get_weather\"}, \"param\": {\"weather\":\"" + strconv.Itoa(wcode) + "\", \"time\":"+strconv.FormatInt(ctime,10)+"}}")
+			_, err2 := conn.Write(write_buffer)
+			if err2 != nil {
+				log.Println("ser send error:", err2)
+				return
+			}
 			
 		case "heartbeat":
 			hbtimes += 1
-			if hbtimes % 15 == 0 {
+			if hbtimes % 25 == 0 {
 				var write_buffer []byte = []byte("{\"common\": {\"device\": \"Fun_pm25\", \"protocol\": \"detect\"}, \"param\": {\"fromport\": 8023, \"airid\": 1010695,\"fromhost\": \"one\"}}")
 				_, err2 := conn.Write(write_buffer)
 				if err2 != nil {
 					log.Println("ser send error:", err2)
-					break
+					return
 				}
-				
 				log.Println("send detect msg:", string(write_buffer)) 
-				
-			} else {
-				ctime := time.Now().Add(time.Hour * 8).Unix()
-				var write_buffer []byte = []byte("{\"common\": {\"code\": 0, \"protocol\": \"get_weather\"}, \"param\": {\"weather\": \"1\", \"time\": "+strconv.FormatInt(ctime,10)+"}}")
-				_, err2 := conn.Write(write_buffer)
-				if err2 != nil {
-					log.Println("ser send error:", err2)
-					break
-				}
-				log.Println("send weather msg:", string(write_buffer)) 
 			}
 		}
 	}
-	
 }
+
+func AddData(t string, h string, pm25 string){
+	ctime := time.Now().Add(time.Hour * 8).Unix()
+	conn, err := sqlite.OpenConn("airnut.db", sqlite.OpenReadWrite|sqlite.OpenNoMutex)
+	if err != nil {
+		log.Println("sqlite.OpenConn: ", err.Error())	
+	}
+
+	err = sqlitex.Execute(conn, "INSERT INTO airNut (t, h, pm25, time) VALUES (?, ?, ?, ?);", &sqlitex.ExecOptions{
+		Args: []interface{}{t, h, pm25, strconv.FormatInt(ctime,10)},
+	})
+	if err != nil {
+		log.Println("sqlite.Execute: ", err.Error())	
+	}
+}
+
+func getWeather() string {
+	resp, err := http.Get(weatherURL)
+	if err != nil {
+	log.Println("err")
+	}
+	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+	log.Println("err")
+	}
+	fmt.Println(string(b))
+	return string(b)
+}
+
+// func InitDB(){
+//     dbFileName := "airnut.db"
+// 	db, err := sql.Open("sqlite3", dbFileName)
+// 	if err != nil {
+// 		fmt.Println(err)
+// 		fmt.Scanln()
+// 	}
+// 	defer db.Close()
+
+// 	sqlStmt := `
+// 	create table airNut (id integer not null primary key, t text, h text, pm25 text, time text);
+// 	`
+// 	_, err = db.Exec(sqlStmt)
+// 	if err != nil {
+// 		log.Printf("%q: %s\n", err, sqlStmt)
+// 		fmt.Scanln()
+// 		return
+// 	}
+// }
+
