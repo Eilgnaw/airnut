@@ -72,16 +72,18 @@ func handle_Client(conn net.Conn) {
 		
 		case "get_weather":
 			result := getWeather()
-			wcode := weatherCode[gjson.Parse(result).Get("weather").String()]
-			ctime := time.Now().Add(time.Hour * 8).Unix()
-			var write_buffer []byte = []byte("{\"common\": {\"code\": 0, \"protocol\": \"get_weather\"}, \"param\": {\"weather\":\"" + strconv.Itoa(wcode) + "\", \"time\":"+strconv.FormatInt(ctime,10)+"}}")
-			_, err2 := conn.Write(write_buffer)
-			if err2 != nil {
-				log.Println("ser get_weather error:", err2)
-				return
+			if result != "" {
+				wcode := weatherCode[gjson.Parse(result).Get("weather").String()]
+				ctime := time.Now().Add(time.Hour * 8).Unix()
+				var write_buffer []byte = []byte("{\"common\": {\"code\": 0, \"protocol\": \"get_weather\"}, \"param\": {\"weather\":\"" + strconv.Itoa(wcode) + "\", \"time\":"+strconv.FormatInt(ctime,10)+"}}")
+				_, err2 := conn.Write(write_buffer)
+				if err2 != nil {
+					log.Println("ser get_weather error:", err2)
+					return
+				}
 			}
 			var write_buffer1 []byte = []byte("{\"common\": {\"device\": \"Fun_pm25\", \"protocol\": \"detect\"}, \"param\": {\"fromport\": 8023, \"airid\": 1010695,\"fromhost\": \"one\"}}")
-			_, err2 = conn.Write(write_buffer1)
+			_, err2 := conn.Write(write_buffer1)
 			if err2 != nil {
 				log.Println("ser detect error:", err2)
 				return
@@ -94,7 +96,7 @@ func handle_Client(conn net.Conn) {
 }
 
 func AddData(t string, h string, pm25 string){
-	ctime := time.Now().Add(time.Hour * 8).Unix()
+	ctime := time.Now().Unix()
 	conn, err := sqlite.OpenConn("airnut.db", sqlite.OpenReadWrite|sqlite.OpenNoMutex)
 	if err != nil {
 		log.Println("sqlite.OpenConn: ", err.Error())	
@@ -111,12 +113,14 @@ func AddData(t string, h string, pm25 string){
 func getWeather() string {
 	resp, err := http.Get(weatherURL)
 	if err != nil {
-	log.Println("err")
+		log.Println(err.Error())
+		return ""
 	}
 	defer resp.Body.Close()
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-	log.Println("err")
+		log.Println(err.Error())
+		return ""
 	}
 	fmt.Println(string(b))
 	return string(b)
