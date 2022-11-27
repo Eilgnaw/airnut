@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -18,6 +19,64 @@ const weatherURL = "https://api.help.bj.cn/apis/weather/?id=101180101"
 
 var weatherCode = map[string]int{"晴": 0, "阴": 1, "多云": 1, "雨": 3, "阵雨": 3, "雷阵雨": 3, "雷阵雨伴有冰雹": 3, "雨夹雪": 6, "小雨": 3, "中雨": 3, "大雨": 3, "暴雨": 3, "大暴雨": 3, "特大暴雨": 3, "阵雪": 5, "小雪": 5, "中雪": 5, "大雪": 5, "暴雪": 5, "雾": 2, "冻雨": 6, "沙尘暴": 2, "小雨转中雨": 3, "中雨转大雨": 3, "大雨转暴雨": 3, "暴雨转大暴雨": 3, "大暴雨转特大暴雨": 3, "小雪转中雪": 5, "中雪转大雪": 5, "大雪转暴雪": 5, "浮沉": 2, "扬沙": 2, "强沙尘暴": 2, "霾": 2}
 
+type Pparam struct {
+	ID string `json:"ID"`
+}
+
+type Weather struct {
+	ID   string `json:"id"`
+	T    string `json:"t"`
+	H    string `json:"h"`
+	PM   string `json:"pm"`
+	Time string `json:"time"`
+}
+
+type ResultResponse struct {
+	Code    int       `json:"code"`
+	Message string    `json:"message"`
+	Data    []Weather `json:"data"`
+}
+
+var dbpool *sqlitex.Pool
+
+func getWeathers(w http.ResponseWriter, r *http.Request) {
+
+	var weathers []Weather
+	response := ResultResponse{Code: 400, Message: "请求失败", Data: weathers}
+	var req Pparam
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		log.Printf("json.NewDecoder err:%s\n", err.Error())
+		http.Error(w, "未知错误", http.StatusBadRequest)
+		return
+	}
+	log.Printf("http.Request :%v\n", req)
+	conn := dbpool.Get(r.Context())
+	if conn == nil {
+		return
+	}
+	defer dbpool.Put(conn)
+	stmt := conn.Prep("SELECT id, t, h, pm25, time FROM airnut WHERE id < $id limit 10;")
+	stmt.SetText("$id", req.ID)
+	for {
+		if hasRow, err := stmt.Step(); err != nil {
+			// ... handle error
+		} else if !hasRow {
+			break
+		}
+		wether := Weather{ID: stmt.GetText("h"), T: stmt.GetText("t"), H: stmt.GetText("h"), Time: stmt.GetText("time"), PM: stmt.GetText("pm25")}
+		weathers = append(weathers, wether)
+
+	}
+	if len(weathers) > 0 {
+		response.Message = "请求成功"
+		response.Data = weathers
+		response.Code = 200
+	}
+	w.Header().Set("Content-Type", "application/json") // and this
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
 	addr := "0.0.0.0:10512"
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
@@ -30,6 +89,17 @@ func main() {
 	} else {
 		log.Println("rpc listening", addr)
 	}
+	//:memory:?mode=memory
+	dbpool, err = sqlitex.Open("airnut.db", 0, 10)
+	if err != nil {
+		log.Fatal(err)
+	}
+	http.HandleFunc("/getWeather", getWeathers)
+
+	go func() {
+		log.Println("http.ListenAndServe")
+		http.ListenAndServe(":9090", nil)
+	}()
 
 	for {
 		conn, err := listener.Accept()
@@ -39,6 +109,7 @@ func main() {
 		}
 		go handle_Client(conn)
 	}
+
 }
 
 func handle_Client(conn net.Conn) {
