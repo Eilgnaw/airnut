@@ -56,7 +56,7 @@ func getWeathers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer dbpool.Put(conn)
-	stmt := conn.Prep("SELECT id, t, h, pm25, time FROM airnut WHERE id < $id limit 10;")
+	stmt := conn.Prep("SELECT id, t, h, pm25, time FROM airnut WHERE id < $id order by id DESC limit 10;")
 	stmt.SetText("$id", req.ID)
 	for {
 		if hasRow, err := stmt.Step(); err != nil {
