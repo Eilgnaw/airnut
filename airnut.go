@@ -64,7 +64,7 @@ func getWeathers(w http.ResponseWriter, r *http.Request) {
 		} else if !hasRow {
 			break
 		}
-		wether := Weather{ID: stmt.GetText("h"), T: stmt.GetText("t"), H: stmt.GetText("h"), Time: stmt.GetText("time"), PM: stmt.GetText("pm25")}
+		wether := Weather{ID: stmt.GetText("id"), T: stmt.GetText("t"), H: stmt.GetText("h"), Time: stmt.GetText("time"), PM: stmt.GetText("pm25")}
 		weathers = append(weathers, wether)
 
 	}
