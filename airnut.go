@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -23,7 +24,12 @@ type Pparam struct {
 	ID string `json:"ID"`
 }
 
-type Weather struct {
+type Temps struct {
+	WTYPE string     `json:"type"`
+	TEMPS []TempData `json:"temps"`
+}
+
+type TempData struct {
 	ID   string `json:"id"`
 	T    string `json:"t"`
 	H    string `json:"h"`
@@ -32,17 +38,19 @@ type Weather struct {
 }
 
 type ResultResponse struct {
-	Code    int       `json:"code"`
-	Message string    `json:"message"`
-	Data    []Weather `json:"data"`
+	Code    int     `json:"code"`
+	Message string  `json:"message"`
+	Data    []Temps `json:"data"`
 }
 
 var dbpool *sqlitex.Pool
 
-func getWeathers(w http.ResponseWriter, r *http.Request) {
+func getTemp(w http.ResponseWriter, r *http.Request) {
 
-	var weathers []Weather
-	response := ResultResponse{Code: 400, Message: "请求失败", Data: weathers}
+	var temps []Temps
+	var outtemps []TempData
+	var intemps []TempData
+	response := ResultResponse{Code: 400, Message: "请求失败", Data: temps}
 	var req Pparam
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
@@ -56,7 +64,7 @@ func getWeathers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer dbpool.Put(conn)
-	stmt := conn.Prep("SELECT id, t, h, pm25, time FROM airnut WHERE id < $id order by id DESC limit 10;")
+	stmt := conn.Prep("SELECT id, t, h, pm25, time, ot, oh, opm25 FROM airnut WHERE id < $id order by id DESC limit 10;")
 	stmt.SetText("$id", req.ID)
 	for {
 		if hasRow, err := stmt.Step(); err != nil {
@@ -64,13 +72,18 @@ func getWeathers(w http.ResponseWriter, r *http.Request) {
 		} else if !hasRow {
 			break
 		}
-		wether := Weather{ID: stmt.GetText("id"), T: stmt.GetText("t"), H: stmt.GetText("h"), Time: stmt.GetText("time"), PM: stmt.GetText("pm25")}
-		weathers = append(weathers, wether)
-
+		intemp := TempData{ID: stmt.GetText("id"), T: stmt.GetText("t"), H: stmt.GetText("h"), Time: stmt.GetText("time"), PM: stmt.GetText("pm25")}
+		outtemp := TempData{ID: stmt.GetText("id"), T: stmt.GetText("ot"), H: stmt.GetText("oh"), Time: stmt.GetText("time"), PM: stmt.GetText("opm25")}
+		outtemps = append(outtemps, outtemp)
+		intemps = append(intemps, intemp)
 	}
-	if len(weathers) > 0 {
+	outtempst := Temps{WTYPE: "out", TEMPS: outtemps}
+	intempst := Temps{WTYPE: "in", TEMPS: intemps}
+	temps = append(temps, outtempst)
+	temps = append(temps, intempst)
+	if len(temps) > 0 {
 		response.Message = "请求成功"
-		response.Data = weathers
+		response.Data = temps
 		response.Code = 200
 	}
 	w.Header().Set("Content-Type", "application/json") // and this
@@ -94,7 +107,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	http.HandleFunc("/getWeather", getWeathers)
+	http.HandleFunc("/getTemp", getTemp)
 
 	go func() {
 		log.Println("http.ListenAndServe")
@@ -135,7 +148,11 @@ func handle_Client(conn net.Conn) {
 			log.Println("send login msg:", string(write_buffer1))
 
 		case "post":
-			AddData(gjson.Parse(read).Get("param.t").String(), gjson.Parse(read).Get("param.h").String(), gjson.Parse(read).Get("param.pm25").String())
+			result := getWeather()
+			ot := gjson.Parse(result).Get("temp").String()
+			oh := gjson.Parse(result).Get("humidity").String()
+			opm25 := gjson.Parse(result).Get("pm25").String()
+			AddData(gjson.Parse(read).Get("param.t").String(), gjson.Parse(read).Get("param.h").String(), gjson.Parse(read).Get("param.pm25").String(), ot, oh, opm25)
 			log.Println("battery:", gjson.Parse(read).Get("param.battery").String(), "t", gjson.Parse(read).Get("param.t").String(), "h:", gjson.Parse(read).Get("param.h").String())
 
 		case "get_weather":
@@ -150,28 +167,21 @@ func handle_Client(conn net.Conn) {
 					return
 				}
 			}
-			write_buffer1 := []byte("{\"common\": {\"device\": \"Fun_pm25\", \"protocol\": \"detect\"}, \"param\": {\"fromport\": 8023, \"airid\": 1010695,\"fromhost\": \"one\"}}")
-			_, err2 := conn.Write(write_buffer1)
-			if err2 != nil {
-				log.Println("ser detect error:", err2)
-				return
-			}
-
 		case "heartbeat":
 			log.Println("heartbeat")
 		}
 	}
 }
 
-func AddData(t string, h string, pm25 string) {
+func AddData(t string, h string, pm25 string, ot string, oh string, opm25 string) {
 	ctime := time.Now().Unix()
 	conn, err := sqlite.OpenConn("airnut.db", sqlite.OpenReadWrite|sqlite.OpenNoMutex)
 	if err != nil {
 		log.Println("sqlite.OpenConn: ", err.Error())
 	}
 
-	err = sqlitex.Execute(conn, "INSERT INTO airNut (t, h, pm25, time) VALUES (?, ?, ?, ?);", &sqlitex.ExecOptions{
-		Args: []interface{}{t, h, pm25, strconv.FormatInt(ctime, 10)},
+	err = sqlitex.Execute(conn, "INSERT INTO airNut (t, h, pm25, time, ot, oh, opm25) VALUES (?, ?, ?, ?, ?, ?, ?);", &sqlitex.ExecOptions{
+		Args: []interface{}{t, h, pm25, strconv.FormatInt(ctime, 10), ot, strings.Replace(oh, "%", "", -1), opm25},
 	})
 	if err != nil {
 		log.Println("sqlite.Execute: ", err.Error())
