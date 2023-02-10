@@ -83,7 +83,7 @@ func getTempList(w http.ResponseWriter, r *http.Request) {
 	stmt.SetText("$id", req.ID)
 	for {
 		if hasRow, err := stmt.Step(); err != nil {
-			// ... handle error
+			log.Printf("stmt.Step() err:%s\n", err.Error())
 		} else if !hasRow {
 			break
 		}
@@ -122,7 +122,7 @@ func getTempA(w http.ResponseWriter, r *http.Request) {
 	stmt.SetText("$id", req.ID)
 	for {
 		if hasRow, err := stmt.Step(); err != nil {
-			// ... handle error
+			log.Printf("stmt.Step() err:%s\n", err.Error())
 		} else if !hasRow {
 			break
 		}
@@ -163,8 +163,6 @@ func getTemp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer dbpool.Put(conn)
-	//SELECT  t, time
-	//   FROM airNut GROUP BY strftime('%H', datetime(time, 'unixepoch'))
 	stmt := conn.Prep("SELECT id, t, h, pm25, time, ot, oh, opm25 FROM airnut WHERE id < $id AND t != '' AND ot != '' GROUP BY strftime('%Y%m%d%H', datetime(time, 'unixepoch')) order by id DESC limit 10;")
 	stmt.SetText("$id", req.ID)
 	for {
@@ -203,7 +201,6 @@ func main() {
 	} else {
 		log.Println("rpc listening", addr)
 	}
-	//:memory:?mode=memory
 	dbpool, err = sqlitex.Open("airnut.db", 0, 10)
 	if err != nil {
 		log.Fatal(err)
@@ -310,6 +307,6 @@ func getWeather() string {
 		log.Println(err.Error())
 		return ""
 	}
-	fmt.Println(string(b))
+	log.Println(string(b))
 	return string(b)
 }
